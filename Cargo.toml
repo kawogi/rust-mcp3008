@@ -1,13 +1,17 @@
 [package]
 name = "mcp3208"
-description = "A MCP3208 sensor driver for Rust."
 version = "1.0.0"
+description = "A MCP3208 sensor driver for Rust."
 authors = ["Philip Trauner <philip.trauner@arztpraxis.io>", "Kai Giebeler <github@kai.giebeler.de>"]
+#edition = "2018"
 repository = "https://github.com/kawogi/rust-mcp3208"
 license = "MIT"
 readme = "README.md"
 categories = ["hardware-support", "external-ffi-bindings"]
-keywords = ["mcp3208", "spi", "sensor", "driver", "linux", "adc"]
+keywords = ["mcp3208", "spi", "sensor", "driver", "linux", "adc", "analog", "mcp", "spi"]
+
+[lib]
+crate-type = ["lib"]
 
 [dependencies]
 [target.'cfg(target_os = "linux")'.dependencies]
