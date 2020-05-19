@@ -15,4 +15,4 @@ crate-type = ["lib"]
 
 [dependencies]
 [target.'cfg(target_os = "linux")'.dependencies]
-spidev = "0.3.0"
+spidev = "0.4.0"

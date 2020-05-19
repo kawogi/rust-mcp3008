@@ -5,6 +5,8 @@ mod tests {
     use super::Mcp3208;
     use std::path::Path;
     use std::env;
+    use crate::Channel;
+    use std::convert::TryFrom;
 
     #[test]
     fn mcp3208_read_adc_single() {
@@ -14,9 +16,9 @@ mod tests {
             if Path::new(&spi_dev_path).exists() {
                 let mut mcp3208 = Mcp3208::new(spi_dev_path).unwrap();
 
-                mcp3208.read_adc_single(0).unwrap();
+                mcp3208.read_adc_single(Channel::Ch0).unwrap();
 
-                if let Ok(_) = mcp3208.read_adc_single(8) {
+                if let Ok(_) = Channel::try_from(8) {
                     panic!("read from adc > 7");
                 }
             } else {
@@ -119,7 +121,7 @@ const fn mask(length: u8) -> u32 {
 
 
 #[cfg(target_os = "linux")]
-use spidev::{SPI_MODE_0, Spidev, SpidevOptions, SpidevTransfer};
+use spidev::{Spidev, SpidevOptions, SpidevTransfer, SpiModeFlags};
 use std::cmp::Ordering;
 use std::convert::TryFrom;
 
@@ -219,7 +221,7 @@ impl Mcp3208 {
     pub fn new(spi_dev_path: &str) -> Result<Mcp3208, Mcp3208Error> {
         let options = SpidevOptions::new()
             .max_speed_hz(1_000_000)
-            .mode(SPI_MODE_0)
+            .mode(SpiModeFlags::SPI_MODE_0)
             .lsb_first(false)
             .build();
 
