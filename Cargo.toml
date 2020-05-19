@@ -1,16 +1,13 @@
 [package]
-name = "mcp3008"
-description = "A MCP3008 sensor driver for Rust."
+name = "mcp3208"
+description = "A MCP3208 sensor driver for Rust."
 version = "1.0.0"
-authors = ["Philip Trauner <philip.trauner@arztpraxis.io>"]
-repository = "https://github.com/PhilipTrauner/rust-mcp3008"
+authors = ["Philip Trauner <philip.trauner@arztpraxis.io>", "Kai Giebeler <github@kai.giebeler.de>"]
+repository = "https://github.com/kawogi/rust-mcp3208"
 license = "MIT"
 readme = "README.md"
 categories = ["hardware-support", "external-ffi-bindings"]
-keywords = ["mcp3008", "spi", "sensor", "driver", "linux"]
-
-[badges]
-travis-ci = { repository = "PhilipTrauner/rust-mcp3008", branch = "master" }
+keywords = ["mcp3208", "spi", "sensor", "driver", "linux", "adc"]
 
 [dependencies]
 [target.'cfg(target_os = "linux")'.dependencies]
