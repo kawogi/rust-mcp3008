@@ -32,7 +32,7 @@ mcp3208 = "1.0.0"
 ```rust
 extern crate mcp3208;
 
-use mcp3008::Mcp3208;
+use mcp3208::Mcp3208;
 
 fn main() {
     if let Ok(mut mcp3208) = Mcp3208::new("/dev/spidev0.0") {
