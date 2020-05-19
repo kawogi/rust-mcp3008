@@ -3,14 +3,8 @@
 [![](https://img.shields.io/crates/v/mcp3208.svg)](https://crates.io/crates/mcp3208)
 [![](https://docs.rs/mcp3208/badge.svg)](https://docs.rs/mcp3208)
 
-<p align="center">
-	<img src="https://user-images.githubusercontent.com/9287847/35982700-b8731460-0cf0-11e8-836a-42537d76396e.png" height="300"/>
-</p>
-
-<p align="center">
-	<strong>MCP3208 A/D converter</strong>
-</p>
-
+[![Day calendar](http://i.imgur.com/uqmd4li.jpg "Day calendar")][ss1]
+[![MCP3208 A/D converter](https://www.microchip.com/_images/products/medium/4a2eee4577eb56184dce8b01c5556be9.png "MCP3208 A/D converter")](https://www.microchip.com/wwwproducts/en/MCP3208)
 
 `rust-mcp3208` is a rewrite of the excellent [Adafruit_Python_MCP3008](https://github.com/adafruit/Adafruit_Python_MCP3008) Python library in Rust. 
 
