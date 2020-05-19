@@ -1,6 +1,6 @@
 [package]
 name = "mcp3208"
-version = "1.0.0"
+version = "0.1.0"
 description = "A MCP3208 sensor driver for Rust."
 authors = ["Philip Trauner <philip.trauner@arztpraxis.io>", "Kai Giebeler <github@kai.giebeler.de>"]
 edition = "2018"

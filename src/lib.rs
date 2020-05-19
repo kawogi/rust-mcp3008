@@ -1,4 +1,4 @@
-//! `rust-mcp3208` is a rewrite of the excellent [Adafruit_Python_MCP3008](https://github.com/adafruit/Adafruit_Python_MCP3008) Python library in Rust.
+//! `rust-mcp3208` is a library to read adc values from an MCP3208 via spi.
 
 #[cfg(test)]
 mod tests {
