@@ -1,4 +1,4 @@
-extern crate mcp3208;
+#![deny(clippy::all)]
 
 use mcp3208::Mcp3208;
 
