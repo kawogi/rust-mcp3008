@@ -7,16 +7,16 @@ mod tests {
     use std::env;
 
     #[test]
-    fn mcp3208_read_adc() {
+    fn mcp3208_read_adc_single() {
         let spi_dev_path = "/dev/spidev0.0";
 
         if cfg!(target_os = "linux") {
             if Path::new(&spi_dev_path).exists() {
                 let mut mcp3208 = Mcp3208::new(spi_dev_path).unwrap();
 
-                mcp3208.read_adc(0).unwrap();
+                mcp3208.read_adc_single(0).unwrap();
 
-                if let Ok(_) = mcp3208.read_adc(8) {
+                if let Ok(_) = mcp3208.read_adc_single(8) {
                     panic!("read from adc > 7");
                 }
             } else {
@@ -39,17 +39,94 @@ use std::io;
 use std::fmt;
 use std::error::Error;
 
-const RESOLUTION: u8 = 12;
-const CHANNEL_SELECT_BITS: u8 = 3;
-const SAMPLE_DELAY_BITS: u8 = 1;
-const SAMPLE_ZERO_BITS: u8 = 1;
-const CHECKSUMMED_RESULT_BITS: u8 = RESOLUTION - 1 + RESOLUTION;
+/// Number of bits to be sent/received within a single transaction
+const FRAME_BIT_COUNT: u8 = 32;
 
-const CHANNEL_COUNT: u8 = 1u8 << CHANNEL_SELECT_BITS;
-const CHANNEL_MASK: u8 = CHANNEL_COUNT - 1;
+/// number of start bits (always 1)
+const START_BIT_COUNT: u8 = 1;
+
+/// index of first (and only) start bit (always the MSB bit)
+const START_BIT_INDEX: u8 = FRAME_BIT_COUNT - START_BIT_COUNT; // 31
+
+/// number of bits to select the mode (single or differential)
+const MODE_BIT_COUNT: u8 = 1;
+
+/// index of the first (and only) mode selection bit
+const MODE_BIT_INDEX: u8 = START_BIT_INDEX - MODE_BIT_COUNT; // 30
+
+/// number of bits required to encode the selected channel
+const CHANNEL_BIT_COUNT: u8 = 3;
+
+/// index of the first bit of the channel selection field
+const CHANNEL_BITS_INDEX: u8 = MODE_BIT_INDEX - CHANNEL_BIT_COUNT; // 27
+
+/// number of supported channels
+const CHANNEL_COUNT: u8 = 1 << CHANNEL_BIT_COUNT;
+
+/// index of the highest channel
+const MAX_CHANNEL_INDEX: u8 = CHANNEL_COUNT - 1;
+
+// /// bitmask to wrap the channel index into a valid range
+// const CHANNEL_INDEX_MASK: u8 = CHANNEL_COUNT - 1;
+
+/// number of bits to wait for the response (always 1)
+const WAIT_BIT_COUNT: u8 = 1;
+
+/// index of the first (and only) wait bit
+const WAIT_BIT_INDEX: u8 = CHANNEL_BITS_INDEX - WAIT_BIT_COUNT; // 26
+
+/// number of zero bits before the returned sample value (always 1)
+const ZERO_BIT_COUNT: u8 = 1;
+
+/// index of the first (and only) zero bit before the returned sample value
+const ZERO_BIT_INDEX: u8 = WAIT_BIT_INDEX - ZERO_BIT_COUNT; // 25
+
+/// resolution of the adc in bits (the MCP3208 has a 12-bit resolution)
+const SAMPLE_BIT_COUNT: u8 = 12;
+
+/// position of the first bit (lsb) of the sampled value within the response
+const SAMPLE_BITS_INDEX: u8 = ZERO_BIT_INDEX - SAMPLE_BIT_COUNT; // 13
+
+/// number of checksum bits within the response
+const CHECKSUM_BIT_COUNT: u8 = SAMPLE_BIT_COUNT - 1; // 11
+
+/// position of the first bit (msb) of the checksum value within the response
+const CHECKSUM_BITS_INDEX: u8 = SAMPLE_BITS_INDEX - CHECKSUM_BIT_COUNT; // 2
+
+/// number of trailing zero-bits within the response
+const PADDING_BIT_COUNT: u8 = CHECKSUM_BITS_INDEX; // 2
+
+/// index of the trailing zero-bits within the response (always 0)
+const PADDING_BITS_INDEX: u8 = 0;
+
+/// index of the lsb of the sampled value _before_ reversing the bits for validation
+const SAMPLE_LSB_INDEX: i8 = SAMPLE_BITS_INDEX as i8; // 13
+
+/// index of the lsb of the sampled value _after_ reversing the bits for validation
+const SAMPLE_LSB_MIRRORED_INDEX: i8 = (FRAME_BIT_COUNT - 1) as i8 - SAMPLE_LSB_INDEX; // 18
+
+/// number of bits to move the reversed pattern to the right to make the lsb align with the original bit-order
+/// This value might be negative, indicating a left-shift is required.
+const SAMPLE_LSB_SHR: i8 = (FRAME_BIT_COUNT - 1) as i8 - 2 * SAMPLE_BITS_INDEX as i8;
+
+/// mask indicating which bits of the response always have to be zero
+const ZERO_VALIDATION_MASK: u32 =
+        mask(START_BIT_COUNT) << START_BIT_INDEX |
+        mask(MODE_BIT_COUNT) << MODE_BIT_INDEX |
+        mask(CHANNEL_BIT_COUNT) << CHANNEL_BITS_INDEX |
+        mask(WAIT_BIT_COUNT) << WAIT_BIT_INDEX |
+        mask(ZERO_BIT_COUNT) << ZERO_BIT_INDEX |
+        mask(PADDING_BIT_COUNT) << PADDING_BITS_INDEX;
+
+/// returns a right-aligned bit-mask with `length` bits set to `1`
+const fn mask(length: u8) -> u32 {
+    (0x0000_0000_ffff_ffff_u64 >> (32 - length)) as u32
+}
+
 
 #[cfg(target_os = "linux")]
 use spidev::{SPI_MODE_0, Spidev, SpidevOptions, SpidevTransfer};
+use std::cmp::Ordering;
 
 #[derive(Debug)]
 pub enum Mcp3208Error {
@@ -105,7 +182,7 @@ pub struct Mcp3208 {
 ///
 /// fn main() {
 ///     if let Ok(mut mcp3208) = Mcp3208::new("/dev/spidev0.0") {
-///         println!("{}", mcp3208.read_adc(0).unwrap());
+///         println!("{}", mcp3208.read_adc_single(0).unwrap());
 ///     }
 /// }
 /// ```
@@ -133,63 +210,95 @@ impl Mcp3208 {
     }
 
     #[cfg(target_os = "linux")]
-    pub fn read_adc(&mut self, adc_number: u8) -> Result<u16, Mcp3208Error> {
-        match adc_number {
-            0..=7 => {
-                // Start bit, single channel read
-                let mut command: u8 = 0b11 << 6;
-                command |= (adc_number & 0x07) << 3;
-                // Bottom 3 bits of command are 0, this is to account for the
-                // extra clock to do the conversion, and the low null bit returned
-                // at the start of the response.
-
-                let is_differential = false;
-
-                // smcccw0r_rrrrrrrr_rrrxxxxx_xxxxxx00
-                // s: start bit = 1
-                // m: mode bit
-                // c: channel selection bit
-                // r: response bit (msb first)
-                // x: checksum bit (lsb first)
-
-                let start_bits = 1 << 31;
-                let mode_bits = if is_differential { 0 } else { 1 }  << 30;
-                let channel_selection_bits = (adc_number as u32) << (30 - CHANNEL_SELECT_BITS);
-                let command_bits = start_bits | mode_bits | channel_selection_bits;
-
-                let response_bits = self.send_command_bits(command_bits)?;
-
-                // everything except the actual sample values and its checksum has to be zero.
-                if response_bits & 0b_11111110_00000000_00000000_00000011 != 0 {
-                    return Err(Mcp3208Error::DataError(format!("invalid response: 0x{:04x}", response_bits)));
-                }
-
-                let checksum = response_bits.reverse_bits() >> 5;
-                if response_bits != checksum {
-                    return Err(Mcp3208Error::DataError(format!("invalid checksum: 0x{:04x}", response_bits)));
-                }
-
-                Ok((response_bits >> 13) as u16)
+    pub fn read_adc_single(&mut self, channel_index: u8) -> Result<u16, Mcp3208Error> {
+        match channel_index {
+            0..=MAX_CHANNEL_INDEX => {
+                let request = Self::build_request(false, channel_index);
+                let response = self.send_request(request)?;
+                Self::parse_response(response)
             }
-            _ => Err(Mcp3208Error::AdcOutOfRangeError(adc_number)),
+            _ => Err(Mcp3208Error::AdcOutOfRangeError(channel_index)),
+        }
+    }
+
+
+    #[cfg(target_os = "linux")]
+    pub fn read_adc_diff(&mut self, channel_index: u8) -> Result<u16, Mcp3208Error> {
+        match channel_index {
+            0..=MAX_CHANNEL_INDEX => {
+                let request = Self::build_request(true, channel_index);
+                let response = self.send_request(request)?;
+                Self::parse_response(response)
+            }
+            _ => Err(Mcp3208Error::AdcOutOfRangeError(channel_index)),
         }
     }
 
     #[inline]
-    fn send_command_bits(&self, command: u32) -> Result<u32, Mcp3208Error> {
-        // split into big endian form
-        let tx_buf = [(command >> 24) as u8, (command >> 16) as u8, (command >> 8) as u8, command as u8];
+    fn build_request(is_differential: bool, channel_index: u8) -> u32 {
+        // pattern:
+        //   smcccw0r_rrrrrrrr_rrrxxxxx_xxxxxx00
+        // request:
+        //   s: start bit = 1
+        //   m: mode bit
+        //   c: channel selection bit
+        // response:
+        //   r: response bit (msb first)
+        //   x: checksum bit (lsb first)
+
+        let start_bits = 1u32 << START_BIT_INDEX;
+        let mode_bits = if is_differential { 0u32 } else { 1u32 }  << MODE_BIT_INDEX;
+        let channel_selection_bits = (channel_index as u32) << CHANNEL_BITS_INDEX;
+        start_bits | mode_bits | channel_selection_bits
+    }
+
+    #[inline]
+    fn send_request(&self, command: u32) -> Result<u32, Mcp3208Error> {
+        let tx_buf = command.to_be_bytes();
         let mut rx_buf = [0_u8; 4];
 
         let mut transfer = SpidevTransfer::read_write(&tx_buf, &mut rx_buf);
         self.spi.transfer(&mut transfer)?;
 
-        // join from big endian
-        Ok((rx_buf[0] as u32) << 24 | (rx_buf[1] as u32) << 16 | (rx_buf[2] as u32) << 8 | (rx_buf[3] as u32))
+        Ok(u32::from_be_bytes(rx_buf))
     }
 
     #[cfg(not(target_os = "linux"))]
-    pub fn read_adc(&mut self, _adc_number: u8) -> Result<u16, Mcp3208Error> {
+    fn send_request(&self, command: u32) -> Result<u32, Mcp3208Error> {
         Err(Mcp3208Error::UnsupportedOSError)
     }
+
+    #[inline]
+    fn parse_response(response_bits: u32) -> Result<u16, Mcp3208Error> {
+        // pattern:
+        //   smcccw0r_rrrrrrrr_rrrxxxxx_xxxxxx00
+        // request:
+        //   s: start bit = 1
+        //   m: mode bit
+        //   c: channel selection bit
+        // response:
+        //   r: response bit (msb first)
+        //   x: checksum bit (lsb first)
+
+        // everything except the actual sample value and its checksum has to be zero.
+        if response_bits & ZERO_VALIDATION_MASK != 0 {
+            return Err(Mcp3208Error::DataError(format!("invalid response: 0x{:04x}", response_bits)));
+        }
+
+        // check if the sampled value is followed by a bit-mirrored copy
+        let reversed = response_bits.reverse_bits();
+        // align original value and mirrored copy
+        let checksum = match i8::cmp(&SAMPLE_LSB_INDEX, &SAMPLE_LSB_MIRRORED_INDEX) {
+            Ordering::Less => reversed >> SAMPLE_LSB_SHR.abs(),
+            Ordering::Equal => reversed,
+            Ordering::Greater => reversed >> SAMPLE_LSB_SHR.abs(),
+        };
+
+        if response_bits != checksum {
+            return Err(Mcp3208Error::DataError(format!("invalid checksum: 0x{:04x}", response_bits)));
+        }
+
+        Ok((response_bits >> SAMPLE_BITS_INDEX) as u16)
+    }
+
 }
