@@ -1,22 +1,22 @@
-//! `rust-mcp3008` is a rewrite of the excellent [Adafruit_Python_MCP3008](https://github.com/adafruit/Adafruit_Python_MCP3008) Python library in Rust.
+//! `rust-mcp3208` is a rewrite of the excellent [Adafruit_Python_MCP3008](https://github.com/adafruit/Adafruit_Python_MCP3008) Python library in Rust.
 
 #[cfg(test)]
 mod tests {
-    use super::Mcp3008;
+    use super::Mcp3208;
     use std::path::Path;
     use std::env;
 
     #[test]
-    fn mcp3008_read_adc() {
+    fn mcp3208_read_adc() {
         let spi_dev_path = "/dev/spidev0.0";
 
         if cfg!(target_os = "linux") {
             if Path::new(&spi_dev_path).exists() {
-                let mut mcp3008 = Mcp3008::new(spi_dev_path).unwrap();
+                let mut mcp3208 = Mcp3208::new(spi_dev_path).unwrap();
 
-                mcp3008.read_adc(0).unwrap();
+                mcp3208.read_adc(0).unwrap();
 
-                if let Ok(_) = mcp3008.read_adc(8) {
+                if let Ok(_) = mcp3208.read_adc(8) {
                     panic!("read from adc > 7");
                 }
             } else {
@@ -43,64 +43,64 @@ use std::error::Error;
 use spidev::{SPI_MODE_0, Spidev, SpidevOptions, SpidevTransfer};
 
 #[derive(Debug)]
-pub enum Mcp3008Error {
+pub enum Mcp3208Error {
     SpidevError(io::Error),
     AdcOutOfRangeError(u8),
     UnsupportedOSError,
 }
 
-impl fmt::Display for Mcp3008Error {
+impl fmt::Display for Mcp3208Error {
     fn fmt(&self, f: &mut fmt::Formatter) -> fmt::Result {
         match *self {
-            Mcp3008Error::SpidevError(ref err) => err.fmt(f),
-            Mcp3008Error::AdcOutOfRangeError(adc_number) => {
+            Mcp3208Error::SpidevError(ref err) => err.fmt(f),
+            Mcp3208Error::AdcOutOfRangeError(adc_number) => {
                 write!(f, "invalid adc number ({})", adc_number)
             }
-            Mcp3008Error::UnsupportedOSError => write!(f, "unsupported os"),
+            Mcp3208Error::UnsupportedOSError => write!(f, "unsupported os"),
         }
     }
 }
 
-impl Error for Mcp3008Error {
+impl Error for Mcp3208Error {
 
     fn cause(&self) -> Option<&dyn Error> {
         match *self {
-            Mcp3008Error::SpidevError(ref err) => Some(err),
-            Mcp3008Error::AdcOutOfRangeError(_) => None,
-            Mcp3008Error::UnsupportedOSError => None,
+            Mcp3208Error::SpidevError(ref err) => Some(err),
+            Mcp3208Error::AdcOutOfRangeError(_) => None,
+            Mcp3208Error::UnsupportedOSError => None,
         }
     }
 }
 
-impl From<io::Error> for Mcp3008Error {
-    fn from(err: io::Error) -> Mcp3008Error {
-        Mcp3008Error::SpidevError(err)
+impl From<io::Error> for Mcp3208Error {
+    fn from(err: io::Error) -> Mcp3208Error {
+        Mcp3208Error::SpidevError(err)
     }
 }
 
-pub struct Mcp3008 {
+pub struct Mcp3208 {
     #[cfg(target_os = "linux")]
     spi: Spidev,
 }
 
-/// Provides access to a MCP3008 A/D converter.
+/// Provides access to a MCP3208 A/D converter.
 /// # Example
 ///
 /// ```rust
-/// extern crate mcp3008;
+/// extern crate mcp3208;
 ///
-/// use mcp3008::Mcp3008;
+/// use mcp3208::Mcp3208;
 ///
 /// fn main() {
-///     if let Ok(mut mcp3008) = Mcp3008::new("/dev/spidev0.0") {
-///         println!("{}", mcp3008.read_adc(0).unwrap());
+///     if let Ok(mut mcp3208) = Mcp3208::new("/dev/spidev0.0") {
+///         println!("{}", mcp3208.read_adc(0).unwrap());
 ///     }
 /// }
 /// ```
-impl Mcp3008 {
-    /// Constructs a new `Mcp3008`.
+impl Mcp3208 {
+    /// Constructs a new `Mcp3208`.
     #[cfg(target_os = "linux")]
-    pub fn new(spi_dev_path: &str) -> Result<Mcp3008, Mcp3008Error> {
+    pub fn new(spi_dev_path: &str) -> Result<Mcp3208, Mcp3208Error> {
         let options = SpidevOptions::new()
             .max_speed_hz(1_000_000)
             .mode(SPI_MODE_0)
@@ -110,18 +110,18 @@ impl Mcp3008 {
         let mut spi = Spidev::open(spi_dev_path.to_string())?;
 
         match spi.configure(&options) {
-            Ok(_) => Ok(Mcp3008 { spi }),
-            Err(err) => Err(Mcp3008Error::SpidevError(err)),
+            Ok(_) => Ok(Mcp3208 { spi }),
+            Err(err) => Err(Mcp3208Error::SpidevError(err)),
         }
     }
 
     #[cfg(not(target_os = "linux"))]
-    pub fn new(_spi_dev_path: &str) -> Result<Mcp3008, Mcp3008Error> {
-        Err(Mcp3008Error::UnsupportedOSError)
+    pub fn new(_spi_dev_path: &str) -> Result<Mcp3208, Mcp3208Error> {
+        Err(Mcp3208Error::UnsupportedOSError)
     }
 
     #[cfg(target_os = "linux")]
-    pub fn read_adc(&mut self, adc_number: u8) -> Result<u16, Mcp3008Error> {
+    pub fn read_adc(&mut self, adc_number: u8) -> Result<u16, Mcp3208Error> {
         match adc_number {
             0..=7 => {
                 // Start bit, single channel read
@@ -148,12 +148,12 @@ impl Mcp3008 {
 
                 Ok(result & 0x3FF)
             }
-            _ => Err(Mcp3008Error::AdcOutOfRangeError(adc_number)),
+            _ => Err(Mcp3208Error::AdcOutOfRangeError(adc_number)),
         }
     }
 
     #[cfg(not(target_os = "linux"))]
-    pub fn read_adc(&mut self, _adc_number: u8) -> Result<u16, Mcp3008Error> {
-        Err(Mcp3008Error::UnsupportedOSError)
+    pub fn read_adc(&mut self, _adc_number: u8) -> Result<u16, Mcp3208Error> {
+        Err(Mcp3208Error::UnsupportedOSError)
     }
 }
