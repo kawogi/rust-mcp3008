@@ -62,15 +62,8 @@ impl fmt::Display for Mcp3008Error {
 }
 
 impl Error for Mcp3008Error {
-    fn description(&self) -> &str {
-        match *self {
-            Mcp3008Error::SpidevError(ref err) => err.description(),
-            Mcp3008Error::AdcOutOfRangeError(_) => "invalid adc number",
-            Mcp3008Error::UnsupportedOSError => "unsupported os",
-        }
-    }
 
-    fn cause(&self) -> Option<&Error> {
+    fn cause(&self) -> Option<&dyn Error> {
         match *self {
             Mcp3008Error::SpidevError(ref err) => Some(err),
             Mcp3008Error::AdcOutOfRangeError(_) => None,
@@ -117,7 +110,7 @@ impl Mcp3008 {
         let mut spi = Spidev::open(spi_dev_path.to_string())?;
 
         match spi.configure(&options) {
-            Ok(_) => Ok(Mcp3008 { spi: spi }),
+            Ok(_) => Ok(Mcp3008 { spi }),
             Err(err) => Err(Mcp3008Error::SpidevError(err)),
         }
     }
@@ -130,7 +123,7 @@ impl Mcp3008 {
     #[cfg(target_os = "linux")]
     pub fn read_adc(&mut self, adc_number: u8) -> Result<u16, Mcp3008Error> {
         match adc_number {
-            0...7 => {
+            0..=7 => {
                 // Start bit, single channel read
                 let mut command: u8 = 0b11 << 6;
                 command |= (adc_number & 0x07) << 3;
