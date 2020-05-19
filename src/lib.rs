@@ -63,12 +63,6 @@ const CHANNEL_BITS_INDEX: u8 = MODE_BIT_INDEX - CHANNEL_BIT_COUNT; // 27
 /// number of supported channels
 const CHANNEL_COUNT: u8 = 1 << CHANNEL_BIT_COUNT;
 
-/// index of the highest channel
-const MAX_CHANNEL_INDEX: u8 = CHANNEL_COUNT - 1;
-
-// /// bitmask to wrap the channel index into a valid range
-// const CHANNEL_INDEX_MASK: u8 = CHANNEL_COUNT - 1;
-
 /// number of bits to wait for the response (always 1)
 const WAIT_BIT_COUNT: u8 = 1;
 
@@ -127,6 +121,39 @@ const fn mask(length: u8) -> u32 {
 #[cfg(target_os = "linux")]
 use spidev::{SPI_MODE_0, Spidev, SpidevOptions, SpidevTransfer};
 use std::cmp::Ordering;
+use std::convert::TryFrom;
+
+#[derive(Debug, Copy, Clone)]
+#[repr(u8)]
+pub enum Channel {
+    Ch0 = 0x0, Ch1, Ch2, Ch3, Ch4, Ch5, Ch6, Ch7
+}
+
+impl Channel {
+    /// List of all channels to facilitate iteration and selection by integer indices
+    pub const VALUES: [Channel; 8] = [
+            Channel::Ch0, Channel::Ch1, Channel::Ch2, Channel::Ch3,
+            Channel::Ch4, Channel::Ch5, Channel::Ch6, Channel::Ch7
+            ];
+
+    /// Return the channel which will be used in pseudo-differential query mode
+    pub fn partner(self) -> Self {
+        Self::VALUES[(self as u8 ^ 0b001) as usize]
+    }
+}
+
+/// Try to convert an integer into a typed channel
+impl TryFrom<u8> for Channel {
+    type Error = Mcp3208Error;
+
+    fn try_from(channel_index: u8) -> Result<Self, Self::Error> {
+        if channel_index < CHANNEL_COUNT {
+            Ok(Channel::VALUES[channel_index as usize])
+        } else {
+            Err(Mcp3208Error::AdcOutOfRangeError(channel_index))
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum Mcp3208Error {
@@ -209,33 +236,24 @@ impl Mcp3208 {
         Err(Mcp3208Error::UnsupportedOSError)
     }
 
+    /// read a raw adc value from a selected channel in single-ended mode
     #[cfg(target_os = "linux")]
-    pub fn read_adc_single(&mut self, channel_index: u8) -> Result<u16, Mcp3208Error> {
-        match channel_index {
-            0..=MAX_CHANNEL_INDEX => {
-                let request = Self::build_request(false, channel_index);
-                let response = self.send_request(request)?;
-                Self::parse_response(response)
-            }
-            _ => Err(Mcp3208Error::AdcOutOfRangeError(channel_index)),
-        }
+    pub fn read_adc_single(&mut self, channel: Channel) -> Result<u16, Mcp3208Error> {
+        let request = Self::build_request(false, channel);
+        let response = self.send_request(request)?;
+        Self::parse_response(response)
     }
 
-
+    /// read a raw adc value from a selected channel in pseudo-differential mode
     #[cfg(target_os = "linux")]
-    pub fn read_adc_diff(&mut self, channel_index: u8) -> Result<u16, Mcp3208Error> {
-        match channel_index {
-            0..=MAX_CHANNEL_INDEX => {
-                let request = Self::build_request(true, channel_index);
-                let response = self.send_request(request)?;
-                Self::parse_response(response)
-            }
-            _ => Err(Mcp3208Error::AdcOutOfRangeError(channel_index)),
-        }
+    pub fn read_adc_diff(&mut self, channel: Channel) -> Result<u16, Mcp3208Error> {
+        let request = Self::build_request(true, channel);
+        let response = self.send_request(request)?;
+        Self::parse_response(response)
     }
 
     #[inline]
-    fn build_request(is_differential: bool, channel_index: u8) -> u32 {
+    fn build_request(is_differential: bool, channel: Channel) -> u32 {
         // pattern:
         //   smcccw0r_rrrrrrrr_rrrxxxxx_xxxxxx00
         // request:
@@ -248,13 +266,13 @@ impl Mcp3208 {
 
         let start_bits = 1u32 << START_BIT_INDEX;
         let mode_bits = if is_differential { 0u32 } else { 1u32 }  << MODE_BIT_INDEX;
-        let channel_selection_bits = (channel_index as u32) << CHANNEL_BITS_INDEX;
+        let channel_selection_bits = (channel as u32) << CHANNEL_BITS_INDEX;
         start_bits | mode_bits | channel_selection_bits
     }
 
     #[inline]
-    fn send_request(&self, command: u32) -> Result<u32, Mcp3208Error> {
-        let tx_buf = command.to_be_bytes();
+    fn send_request(&self, request: u32) -> Result<u32, Mcp3208Error> {
+        let tx_buf = request.to_be_bytes();
         let mut rx_buf = [0_u8; 4];
 
         let mut transfer = SpidevTransfer::read_write(&tx_buf, &mut rx_buf);
