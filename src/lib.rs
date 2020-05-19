@@ -39,6 +39,15 @@ use std::io;
 use std::fmt;
 use std::error::Error;
 
+const RESOLUTION: u8 = 12;
+const CHANNEL_SELECT_BITS: u8 = 3;
+const SAMPLE_DELAY_BITS: u8 = 1;
+const SAMPLE_ZERO_BITS: u8 = 1;
+const CHECKSUMMED_RESULT_BITS: u8 = RESOLUTION - 1 + RESOLUTION;
+
+const CHANNEL_COUNT: u8 = 1u8 << CHANNEL_SELECT_BITS;
+const CHANNEL_MASK: u8 = CHANNEL_COUNT - 1;
+
 #[cfg(target_os = "linux")]
 use spidev::{SPI_MODE_0, Spidev, SpidevOptions, SpidevTransfer};
 
@@ -47,6 +56,7 @@ pub enum Mcp3208Error {
     SpidevError(io::Error),
     AdcOutOfRangeError(u8),
     UnsupportedOSError,
+    DataError(String),
 }
 
 impl fmt::Display for Mcp3208Error {
@@ -57,6 +67,7 @@ impl fmt::Display for Mcp3208Error {
                 write!(f, "invalid adc number ({})", adc_number)
             }
             Mcp3208Error::UnsupportedOSError => write!(f, "unsupported os"),
+            Mcp3208Error::DataError(ref message) => f.write_str(message),
         }
     }
 }
@@ -68,6 +79,7 @@ impl Error for Mcp3208Error {
             Mcp3208Error::SpidevError(ref err) => Some(err),
             Mcp3208Error::AdcOutOfRangeError(_) => None,
             Mcp3208Error::UnsupportedOSError => None,
+            Mcp3208Error::DataError(_) => None,
         }
     }
 }
@@ -131,25 +143,49 @@ impl Mcp3208 {
                 // extra clock to do the conversion, and the low null bit returned
                 // at the start of the response.
 
-                let tx_buf = [command, 0x0, 0x0];
-                let mut rx_buf = [0_u8; 3];
+                let is_differential = false;
 
-                // Marked as own scope so that rx_buf isn't borrowed
-                // anymore after the transfer() call
-                {
-                    let mut transfer = SpidevTransfer::read_write(&tx_buf, &mut rx_buf);
+                // smcccw0r_rrrrrrrr_rrrxxxxx_xxxxxx00
+                // s: start bit = 1
+                // m: mode bit
+                // c: channel selection bit
+                // r: response bit (msb first)
+                // x: checksum bit (lsb first)
 
-                    self.spi.transfer(&mut transfer)?;
+                let start_bits = 1 << 31;
+                let mode_bits = if is_differential { 0 } else { 1 }  << 30;
+                let channel_selection_bits = (adc_number as u32) << (30 - CHANNEL_SELECT_BITS);
+                let command_bits = start_bits | mode_bits | channel_selection_bits;
+
+                let response_bits = self.send_command_bits(command_bits)?;
+
+                // everything except the actual sample values and its checksum has to be zero.
+                if response_bits & 0b_11111110_00000000_00000000_00000011 != 0 {
+                    return Err(Mcp3208Error::DataError(format!("invalid response: 0x{:04x}", response_bits)));
                 }
 
-                let mut result = (rx_buf[0] as u16 & 0x01) << 9;
-                result |= (rx_buf[1] as u16 & 0xFF) << 1;
-                result |= (rx_buf[2] as u16 & 0x80) >> 7;
+                let checksum = response_bits.reverse_bits() >> 5;
+                if response_bits != checksum {
+                    return Err(Mcp3208Error::DataError(format!("invalid checksum: 0x{:04x}", response_bits)));
+                }
 
-                Ok(result & 0x3FF)
+                Ok((response_bits >> 13) as u16)
             }
             _ => Err(Mcp3208Error::AdcOutOfRangeError(adc_number)),
         }
+    }
+
+    #[inline]
+    fn send_command_bits(&self, command: u32) -> Result<u32, Mcp3208Error> {
+        // split into big endian form
+        let tx_buf = [(command >> 24) as u8, (command >> 16) as u8, (command >> 8) as u8, command as u8];
+        let mut rx_buf = [0_u8; 4];
+
+        let mut transfer = SpidevTransfer::read_write(&tx_buf, &mut rx_buf);
+        self.spi.transfer(&mut transfer)?;
+
+        // join from big endian
+        Ok((rx_buf[0] as u32) << 24 | (rx_buf[1] as u32) << 16 | (rx_buf[2] as u32) << 8 | (rx_buf[3] as u32))
     }
 
     #[cfg(not(target_os = "linux"))]
