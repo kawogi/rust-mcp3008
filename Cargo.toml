@@ -8,7 +8,7 @@ repository = "https://github.com/kawogi/rust-mcp3208"
 license = "MIT"
 readme = "README.md"
 categories = ["hardware-support", "external-ffi-bindings"]
-keywords = ["mcp3208", "spi", "sensor", "driver", "linux", "adc", "analog", "mcp", "spi"]
+keywords = ["mcp3208", "spi", "driver", "adc", "analog"]
 
 [lib]
 crate-type = ["lib"]
